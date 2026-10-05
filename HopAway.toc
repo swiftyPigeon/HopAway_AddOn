@@ -1,0 +1,15 @@
+## Interface: 16001
+## Title: HopAway
+## Notes: Ask other HopAway users for an invite to move to another layer of your zone.
+## Author: SwiftyPigeon512
+## Version: 0.1.0
+## X-License: MIT
+## X-Website: https://github.com/mizermaps/HopAway_AddOn
+## SavedVariables: HopAwayDB
+## IconTexture: Interface\Icons\Spell_Arcane_Blink
+
+Logic.lua
+Core.lua
+Layers.lua
+Hop.lua
+UI.lua
