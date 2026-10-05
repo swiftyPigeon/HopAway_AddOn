@@ -4,7 +4,7 @@
 ## Author: SwiftyPigeon512
 ## Version: 0.1.0
 ## X-License: MIT
-## X-Website: https://github.com/mizermaps/HopAway_AddOn
+## X-Website: https://github.com/swiftyPigeon/HopAway_AddOn
 ## SavedVariables: HopAwayDB
 ## IconTexture: Interface\Icons\Spell_Arcane_Blink
 
