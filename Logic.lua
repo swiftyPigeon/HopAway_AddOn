@@ -244,12 +244,16 @@ function L.WeightedPick(items, weight, rng)
   return last -- float rounding
 end
 
--- Pick another layer that has at least one helper, weighted by helper count.
--- This is a guess: we can't see how many real players are on any layer.
+-- Pick another layer that has at least one helper, aiming for a less
+-- populated one: a layer with fewer known HopAway users is likely to have
+-- fewer players too, so the weight is 1/users² (1 user vs 2 = 4:1). Only a
+-- hint: we can't see how many real players are on any layer. It stays
+-- random so askers don't all pile onto the same quiet layer.
 function L.PickLayer(layers, myUid, rng)
   local layer = L.WeightedPick(layers, function(l)
-    if l.uid == myUid then return 0 end
-    return l.helpers
+    if l.uid == myUid or l.helpers <= 0 then return 0 end
+    local users = math.max(l.users or 1, 1)
+    return 1 / (users * users)
   end, rng)
   return layer and layer.uid
 end
@@ -274,6 +278,34 @@ L.BACKOFF = { 20, 60, 180 }
 function L.Backoff(failures)
   if failures <= 0 then return 0 end
   return L.BACKOFF[math.min(failures, #L.BACKOFF)]
+end
+
+---------------------------------------------------------------------------
+-- Settings and realm type
+---------------------------------------------------------------------------
+
+L.OPTION_KEYS = { "share", "help", "autoInvite", "autoAccept" }
+
+-- Everything on: what makes sharing and hopping work best. Used on PvE
+-- realms by default, and by "/hop on".
+L.RECOMMENDED = { share = true, help = true, autoInvite = true, autoAccept = true }
+
+-- What one outdoor zone says about the realm: "pvp", "pve" or nil (no clue).
+-- GetZonePVPInfo() returns "contested" only on PvP realms; on PvE realms a
+-- contested zone returns nil. friendly/hostile/sanctuary say nothing.
+function L.ZoneRealmEvidence(pvpType, inInstance)
+  if inInstance then return nil end
+  if pvpType == "contested" then return "pvp" end
+  if pvpType == nil or pvpType == "" then return "pve" end
+  return nil
+end
+
+-- Settings a character starts with: all on for PvE, all off for PvP or when
+-- the realm type isn't known yet.
+function L.StartSettings(realmType)
+  local out = {}
+  for _, k in ipairs(L.OPTION_KEYS) do out[k] = realmType == "pve" and L.RECOMMENDED[k] or false end
+  return out
 end
 
 ---------------------------------------------------------------------------

@@ -5,12 +5,14 @@ local L = ns.Logic
 ns.PREFIX = "HopAway"     -- addon message prefix (max 16 chars)
 ns.CHANNEL = "HopAwayNet" -- hidden custom channel for announces and asks
 
-local DEFAULTS = {
-  share = false,      -- announce my layer
-  help = false,       -- answer asks from players who want to join my layer
-  autoInvite = false, -- invite askers without a popup
-  autoAccept = false, -- accept the invite from the helper I asked
+-- Account-wide (HopAwayDB). The hop settings are per character
+-- (HopAwayCharDB, see Setup.lua) because PvE and PvP realms start differently:
+--   share, help, autoInvite, autoAccept: the four toggles
+--   chosen: the player picked settings themselves (we never override them)
+--   welcomed: the "HopAway is on" welcome was printed
+local ACCOUNT_DEFAULTS = {
   minimap = { angle = 250, hide = false },
+  realms = {}, -- [realm] = "pvp" | "pve", learned from zone PvP info
 }
 
 local function CopyDefaults(src, dst)
@@ -136,6 +138,7 @@ ns.OPTION_NAMES = {
 function ns.SetOption(key, value)
   value = value and true or false
   ns.db[key] = value
+  ns.db.chosen = true
   ns.Print("%s: %s", ns.OPTION_NAMES[key], value and "|cff60ff60on|r" or "|cffff6060off|r")
   -- Helpers must be announced to be found, so help implies share.
   if key == "help" and value and not ns.db.share then
@@ -144,6 +147,21 @@ function ns.SetOption(key, value)
   elseif key == "share" and not value and ns.db.help then
     ns.db.help = false
     ns.Print("Layer help needs your layer shared, so layer help is now off too.")
+  end
+  ns.Layers.RequestAnnounce()
+  ns.UI.Refresh()
+end
+
+-- All on (the recommended set) or all off, chosen by the player.
+function ns.SetAll(on)
+  for _, k in ipairs(L.OPTION_KEYS) do ns.db[k] = on and L.RECOMMENDED[k] or false end
+  ns.db.chosen = true
+  if on then
+    ns.Print("Everything is on: sharing, layer help, auto-invite and auto-accept. " ..
+      "Use /hop off or the window (/hop show) to change it.")
+  else
+    ns.Print("Everything is off. Turn on what you want in the window (/hop show) " ..
+      "or with /hop share|help|autoinvite|autoaccept on.")
   end
   ns.Layers.RequestAnnounce()
   ns.UI.Refresh()
@@ -160,6 +178,7 @@ local function Usage()
   ns.Print("  /hop away - ask for an invite to another layer of this zone")
   ns.Print("  /hop cancel - stop the current hop")
   ns.Print("  /hop status - your layer, known layers, hop state")
+  ns.Print("  /hop on|off - turn everything on or off")
   ns.Print("  /hop share|help|autoinvite|autoaccept on|off")
   ns.Print("  /hop show - toggle the layer window;  /hop minimap - toggle the minimap button")
 end
@@ -174,8 +193,10 @@ local function HandleSlash(input)
     for _, line in ipairs(ns.Hop.StatusLines()) do ns.Print(line) end
   elseif cmd == "show" then
     ns.UI.Toggle()
+  elseif cmd == "on" or cmd == "off" then
+    ns.SetAll(cmd == "on")
   elseif cmd == "minimap" then
-    ns.db.minimap.hide = not ns.db.minimap.hide
+    ns.adb.minimap.hide = not ns.adb.minimap.hide
     ns.UI.UpdateMinimap()
   elseif SLASH_OPTIONS[cmd] and (arg == "on" or arg == "off") then
     ns.SetOption(SLASH_OPTIONS[cmd], arg == "on")
@@ -194,8 +215,11 @@ SlashCmdList.HOPAWAY = function(input) ns.Safe(HandleSlash, input or "") end
 
 ns.On("ADDON_LOADED", function(name)
   if name ~= ADDON then return end
-  HopAwayDB = CopyDefaults(DEFAULTS, HopAwayDB or {})
-  ns.db = HopAwayDB
+  HopAwayDB = CopyDefaults(ACCOUNT_DEFAULTS, HopAwayDB or {})
+  for _, k in ipairs(L.OPTION_KEYS) do HopAwayDB[k] = nil end -- 0.1.0 kept them here
+  ns.adb = HopAwayDB
+  HopAwayCharDB = HopAwayCharDB or {}
+  ns.db = HopAwayCharDB
 end)
 
 ns.On("PLAYER_LOGIN", function()
@@ -203,6 +227,7 @@ ns.On("PLAYER_LOGIN", function()
   ns.me = L.FullName(UnitName("player"), ns.realm)
   C_ChatInfo.RegisterAddonMessagePrefix(ns.PREFIX)
   ns.Every(0.2, Flush)
+  ns.Setup.Init()
   ns.Layers.Init()
   ns.UI.Init()
 end)

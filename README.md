@@ -25,14 +25,32 @@ out of date after a patch, update that number. To get the current one in game:
   to another layer, and dragging moves it around the minimap edge. The tooltip shows your status.
 - `/hop away`: ask for an invite to another known layer in your zone.
 - `/hop cancel`: stop the current hop.
-- `/hop status`: your zone and layer, known layers with HopAway user/helper counts, hop state.
-- `/hop share|help|autoinvite|autoaccept on|off`: settings (also checkboxes in the window).
+- `/hop status`: your zone and layer, known layers with HopAway user/helper counts, realm type, hop state.
+- `/hop on|off`: turn every setting on or off.
+- `/hop share|help|autoinvite|autoaccept on|off`: single settings (also in the window).
 - `/hop show`: toggle the window. `/hop minimap`: toggle the minimap button.
 
 In the window, click a layer to hop to that one. Your own layer is green.
-Layers with no helpers are grey and can't be clicked.
+Layers with no helpers are grey and can't be clicked. The **All off** radio
+button turns every setting off; tick the boxes below it to turn single parts
+back on.
 
-## Settings (all off by default)
+## Settings
+
+Settings are saved per character.
+
+- **PvE realms:** everything starts **on**, since that's what makes hopping
+  work for you and everyone else. A chat message says so on first login.
+  Use `/hop off` or **All off** to opt out.
+- **PvP realms:** everything starts **off**, and a popup asks whether you
+  want to turn it on. See *Privacy* below.
+- **Realm type not known yet:** the game only gives this away in a contested
+  zone, so a new character in a starting zone gets the same popup, starting off.
+  Once HopAway learns the realm type, other characters on that realm skip
+  this step. If you never chose settings yourself and the realm turns out to
+  be PvP, HopAway turns itself off.
+
+Anything you change yourself is kept and never overridden.
 
 | Setting | What it does |
 |---|---|
@@ -41,13 +59,25 @@ Layers with no helpers are grey and can't be clicked.
 | Auto-invite askers | When someone you offered to help asks, invite them without a popup. Otherwise you get an Accept/Decline popup (20 s). |
 | Auto-accept my helper's invite | Accepts the invite only when it comes from the exact helper you asked. Invites from anyone else are never auto-accepted. |
 
+## Privacy
+
+HopAway users share through a chat channel (`HopAwayNet`) that anyone can
+join. When *Share my layer* is on, anyone on that channel can see your
+character name, zone and layer. On a PvP realm, enemy players could use this
+to find you, which is why HopAway starts off there. With sharing off, your
+zone and layer aren't sent, but your name still shows in the channel's
+member list.
+
 ## How it works
 
 1. HopAway reads your layer from the `zoneUID` in NPC GUIDs (target, mouseover,
    nameplates). A new value only counts after two different NPCs show it and the
    old one has been gone for a few seconds.
 2. Users who share their layer announce it on a hidden chat channel (`HopAwayNet`) using addon messages.
-3. When you hop, HopAway picks another known layer with helpers and asks there. Helpers
+3. When you hop, HopAway picks another known layer with helpers and asks there.
+   It favours layers with fewer known HopAway users (a hint that fewer
+   players are there too), with some randomness so askers don't all pick the
+   same layer. Helpers
    reply with a chance scaled so that about 6 of them answer. You ask one of them
    (up to 3 in a row) to invite you.
 4. When you join their group, the game moves you to their layer. HopAway sees the new

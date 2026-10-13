@@ -6,10 +6,10 @@ ns.UI = UI
 local MAX_ROWS = 8
 local ROW_H = 18
 local TOP_H = 52     -- title + zone line
-local BOTTOM_H = 186 -- note, hop button, status, checkboxes
+local BOTTOM_H = 208 -- note, hop button, status, "All off", checkboxes
 local WIDTH = 260
 
-local frame, rows, checks, minimapButton
+local frame, rows, checks, allOff, minimapButton
 
 ---------------------------------------------------------------------------
 -- Popups
@@ -79,7 +79,12 @@ local function Render()
 
   frame.hopButton:SetText(ns.Hop.IsIdle() and "Hop to another layer" or "Cancel hop")
   frame.status:SetText("Hop: " .. ns.Hop.Describe())
-  for _, cb in ipairs(checks) do cb:SetChecked(ns.db[cb.key]) end
+  local anyOn = false
+  for _, cb in ipairs(checks) do
+    cb:SetChecked(ns.db[cb.key])
+    anyOn = anyOn or ns.db[cb.key]
+  end
+  allOff:SetChecked(not anyOn)
 end
 
 local function CreateWindow()
@@ -134,21 +139,21 @@ local function CreateWindow()
 
   -- Bottom part, anchored to the frame's bottom edge.
   local note = frame:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-  note:SetPoint("BOTTOMLEFT", 14, 152)
+  note:SetPoint("BOTTOMLEFT", 14, 174)
   note:SetWidth(WIDTH - 28)
   note:SetJustifyH("LEFT")
-  note:SetText("Counts are HopAway users only, not real crowd sizes. " ..
-    "Click a layer with helpers to hop there. Any choice is a guess.")
+  note:SetText("Counts are HopAway users only, not real crowd sizes. Hop picks a layer " ..
+    "with fewer known users, or click one with helpers. Any choice is a guess.")
 
   frame.hopButton = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
   frame.hopButton:SetSize(200, 22)
-  frame.hopButton:SetPoint("BOTTOM", 0, 124)
+  frame.hopButton:SetPoint("BOTTOM", 0, 146)
   frame.hopButton:SetScript("OnClick", function()
     if ns.Hop.IsIdle() then ns.Safe(ns.Hop.Away) else ns.Safe(ns.Hop.Cancel) end
   end)
 
   frame.status = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-  frame.status:SetPoint("BOTTOMLEFT", 14, 104)
+  frame.status:SetPoint("BOTTOMLEFT", 14, 126)
   frame.status:SetWidth(WIDTH - 28)
   frame.status:SetJustifyH("LEFT")
 
@@ -164,6 +169,19 @@ local function CreateWindow()
     cb:SetScript("OnClick", function(self) ns.Safe(ns.SetOption, self.key, self:GetChecked()) end)
     checks[i] = cb
   end
+
+  -- "All off" radio button above the checkboxes: selecting it turns every
+  -- setting off; checking any box below turns that part back on.
+  allOff = CreateFrame("CheckButton", nil, frame, "UIRadioButtonTemplate")
+  allOff:SetSize(16, 16)
+  allOff:SetPoint("BOTTOMLEFT", 14, 14 + #CHECKS * 22)
+  local label = allOff:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+  label:SetPoint("LEFT", allOff, "RIGHT", 6, 0)
+  label:SetText("All off")
+  allOff:SetScript("OnClick", function(self)
+    self:SetChecked(true) -- a radio button stays selected; the boxes undo it
+    ns.Safe(ns.SetAll, false)
+  end)
 
   frame:SetScript("OnShow", function() ns.Safe(Render) end)
 end
@@ -183,7 +201,7 @@ end
 ---------------------------------------------------------------------------
 
 local function PlaceMinimapButton()
-  local angle = math.rad(ns.db.minimap.angle)
+  local angle = math.rad(ns.adb.minimap.angle)
   local radius = Minimap:GetWidth() / 2 + 5
   minimapButton:ClearAllPoints()
   minimapButton:SetPoint("CENTER", Minimap, "CENTER", math.cos(angle) * radius, math.sin(angle) * radius)
@@ -193,7 +211,7 @@ local function DragUpdate()
   local mx, my = Minimap:GetCenter()
   local scale = Minimap:GetEffectiveScale()
   local cx, cy = GetCursorPosition()
-  ns.db.minimap.angle = math.deg(math.atan2(cy / scale - my, cx / scale - mx))
+  ns.adb.minimap.angle = math.deg(math.atan2(cy / scale - my, cx / scale - mx))
   PlaceMinimapButton()
 end
 
@@ -249,7 +267,7 @@ end
 
 function UI.UpdateMinimap()
   if not minimapButton then return end
-  minimapButton:SetShown(not ns.db.minimap.hide)
+  minimapButton:SetShown(not ns.adb.minimap.hide)
 end
 
 function UI.Init()

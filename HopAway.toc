@@ -6,10 +6,12 @@
 ## X-License: MIT
 ## X-Website: https://github.com/swiftyPigeon/HopAway_AddOn
 ## SavedVariables: HopAwayDB
+## SavedVariablesPerCharacter: HopAwayCharDB
 ## IconTexture: Interface\Icons\Spell_Arcane_Blink
 
 Logic.lua
 Core.lua
+Setup.lua
 Layers.lua
 Hop.lua
 UI.lua

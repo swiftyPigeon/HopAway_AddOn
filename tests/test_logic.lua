@@ -135,6 +135,40 @@ test("PickLayer skips my layer and layers without helpers", function()
   eq(L.PickLayer({ { uid = "100", helpers = 3 } }, "100", math.random), nil)
 end)
 
+test("PickLayer favours layers with fewer known users", function()
+  local layers = {
+    { uid = "100", users = 4, helpers = 3 }, -- weight 1/16
+    { uid = "200", users = 1, helpers = 1 }, -- weight 1
+    { uid = "300", users = 9, helpers = 9 }, -- mine
+  }
+  eq(L.PickLayer(layers, "300", function() return 0.5 end), "200")
+  local counts = {}
+  for _ = 1, 2000 do
+    local uid = L.PickLayer(layers, "300", math.random)
+    counts[uid] = (counts[uid] or 0) + 1
+  end
+  eq(counts["300"], nil, "never my layer")
+  assert(counts["200"] > counts["100"] * 8, "weights")
+  assert((counts["100"] or 0) > 0, "busier layers still possible")
+end)
+
+test("ZoneRealmEvidence", function()
+  eq(L.ZoneRealmEvidence("contested", false), "pvp")
+  eq(L.ZoneRealmEvidence(nil, false), "pve")
+  eq(L.ZoneRealmEvidence("friendly", false), nil)
+  eq(L.ZoneRealmEvidence("hostile", false), nil)
+  eq(L.ZoneRealmEvidence("sanctuary", false), nil)
+  eq(L.ZoneRealmEvidence(nil, true), nil, "instance")
+end)
+
+test("StartSettings: on for PvE, off for PvP and unknown", function()
+  for _, k in ipairs(L.OPTION_KEYS) do
+    eq(L.StartSettings("pve")[k], true, k)
+    eq(L.StartSettings("pvp")[k], false, k)
+    eq(L.StartSettings(nil)[k], false, k)
+  end
+end)
+
 test("ReplyChance aims for ~6 offers", function()
   eq(L.ReplyChance(3, 6), 1)
   eq(L.ReplyChance(60, 6), 0.1)

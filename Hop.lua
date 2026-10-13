@@ -100,8 +100,8 @@ function Hop.Away(targetUid)
   hop.offers, hop.tried = {}, {}
   SetState("collecting")
   ns.Send("Q", { map = ns.Layers.GetMap(), uid = targetUid, nonce = hop.nonce }, "CHANNEL")
-  ns.Print("Asking for an invite to layer #%s. This is a guess: HopAway can't see how " ..
-    "crowded layers really are.", targetUid)
+  ns.Print("Asking for an invite to layer #%s. HopAway favours layers with fewer known " ..
+    "HopAway users, but it can't see how crowded layers really are.", targetUid)
   Later(COLLECT_TIME, Hop.NextHelper)
 end
 
@@ -322,6 +322,9 @@ function Hop.StatusLines()
   end
   lines[#lines + 1] = "Counts include HopAway users only, not real player numbers."
   lines[#lines + 1] = "Hop: " .. Hop.Describe()
+  local realm = ns.Setup.RealmType()
+  lines[#lines + 1] = "Realm: " .. (realm == "pvp" and "PvP" or realm == "pve" and "PvE" or
+    "type not known yet")
   lines[#lines + 1] = ("Share %s, layer help %s, auto-invite %s, auto-accept %s"):format(
     OnOff(ns.db.share), OnOff(ns.db.help), OnOff(ns.db.autoInvite), OnOff(ns.db.autoAccept))
   return lines
