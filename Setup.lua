@@ -9,13 +9,13 @@ ns.Setup = Setup
 
 local WELCOME_DELAY = 10 -- after login, once the chat and channel are settled
 local ZONE_DELAY = 3     -- zone PvP info can lag behind the zone change
-local PVE_ZONES = 2      -- outdoor zones without a PvP type before we say PvE
 
-local pveZones = {} -- [mapID] = true, this session only
-
--- "pvp", "pve" or nil; remembered per realm for all characters.
+-- "pvp", "pve" or nil. A contested zone (remembered per realm for all
+-- characters) proves PvP; otherwise the realm name may say. Nothing else
+-- counts as proof of PvE.
 function Setup.RealmType()
-  return ns.adb and ns.realm and ns.adb.realms[ns.realm]
+  if not (ns.adb and ns.realm) then return nil end
+  return ns.adb.realms[ns.realm] or L.RealmNameHint(ns.realm)
 end
 
 local function ApplyStart(realmType)
@@ -78,7 +78,9 @@ StaticPopupDialogs.HOPAWAY_WELCOME = {
 -- settings get the start settings for it.
 local function Learned(realmType)
   if ns.adb.realms[ns.realm] == realmType then return end
+  local before = Setup.RealmType()
   ns.adb.realms[ns.realm] = realmType
+  if before == realmType then return end -- the realm name already said so
   if ns.db.chosen or StaticPopup_Visible("HOPAWAY_WELCOME") then return end
   local wasOn = ns.db.share
   ApplyStart(realmType)
@@ -94,18 +96,7 @@ local function CheckZone()
   if not ns.realm or Setup.RealmType() == "pvp" then return end
   local get = (C_PvP and C_PvP.GetZonePVPInfo) or GetZonePVPInfo
   if not get then return end
-  local evidence = L.ZoneRealmEvidence((get()), IsInInstance())
-  if evidence == "pvp" then
-    Learned("pvp")
-  elseif evidence == "pve" and not Setup.RealmType() then
-    -- Only "contested" is proof; a missing PvP type could be a glitch, so
-    -- wait until several zones agree.
-    local map = C_Map.GetBestMapForUnit("player")
-    if map then pveZones[map] = true end
-    local n = 0
-    for _ in pairs(pveZones) do n = n + 1 end
-    if n >= PVE_ZONES then Learned("pve") end
-  end
+  if L.ZoneRealmEvidence((get()), IsInInstance()) == "pvp" then Learned("pvp") end
 end
 
 ns.On("PLAYER_ENTERING_WORLD", function() ns.After(ZONE_DELAY, CheckZone) end)
@@ -122,6 +113,22 @@ end
 
 -- Called at PLAYER_LOGIN, before the channel is joined.
 function Setup.Init()
-  if not ns.db.chosen then ApplyStart(Setup.RealmType()) end
+  -- 0.3.0 and older stored "pve" for realms whose zones had no PvP type,
+  -- which happens on PvP realms too. Forget those guesses once.
+  if not ns.adb.realmsFixed then
+    for realm, t in pairs(ns.adb.realms) do
+      if t == "pve" then ns.adb.realms[realm] = nil end
+    end
+    ns.adb.realmsFixed = true
+  end
+  if not ns.db.chosen then
+    local wasOn = ns.db.share
+    local realmType = Setup.RealmType()
+    ApplyStart(realmType)
+    if wasOn and not ns.db.share then
+      ns.Print(realmType == "pvp" and "This is a PvP realm, so HopAway turned itself off." or
+        "HopAway can't tell whether this realm is PvE or PvP, so it turned itself off until you choose.")
+    end
+  end
   ns.After(WELCOME_DELAY, Welcome)
 end

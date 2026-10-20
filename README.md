@@ -53,11 +53,14 @@ Settings are saved per character.
   Use `/hop off` or **All off** to opt out.
 - **PvP realms:** everything starts **off**, and a popup asks whether you
   want to turn it on. See *Privacy* below.
-- **Realm type not known yet:** the game only gives this away in a contested
-  zone, so a new character in a starting zone gets the same popup, starting off.
-  Once HopAway learns the realm type, other characters on that realm skip
-  this step. If you never chose settings yourself and the realm turns out to
-  be PvP, HopAway turns itself off.
+- **How HopAway knows:** a realm whose name says its ruleset (WoW: Forever's
+  `ClassicBetaPvE` / `ClassicBetaPvP`) is taken at its word. Otherwise only a
+  contested zone proves anything (PvP), and that's remembered for every
+  character on the realm. A zone without a PvP type proves nothing, because
+  PvP realms report that too.
+- **Realm type not known:** everything starts **off** and you get the popup.
+  If you never chose settings yourself and the realm turns out to be PvP,
+  HopAway turns itself off.
 
 Anything you change yourself is kept and never overridden.
 
@@ -84,7 +87,10 @@ member list.
    nameplates). A new value only counts after two different NPCs show it and the
    old one has been gone for a few seconds.
 2. It also counts the distinct players it notices on your layer in the last 5 min
-   (combat log, nameplates, target, mouseover): the crowd sample.
+   (nameplates, target, mouseover): the crowd sample. Turn on friendly player
+   nameplates (Options > Interface > Nameplates) for a much better count: by
+   default only enemy players get nameplates. This client doesn't let addons
+   read the combat log, so HopAway can't count players from it.
 3. Users who share their layer announce it, with their crowd sample, on a hidden
    chat channel (`HopAwayNet`) using addon messages.
 4. When you hop, HopAway picks another known layer with helpers and asks there.

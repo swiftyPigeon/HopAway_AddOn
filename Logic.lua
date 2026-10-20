@@ -311,7 +311,7 @@ end
 
 ---------------------------------------------------------------------------
 -- Crowd sample: distinct players noticed on our layer in the last few
--- minutes (combat log, nameplates, target, mouseover).
+-- minutes (nameplates, target, mouseover).
 ---------------------------------------------------------------------------
 
 function L.IsPlayerGUID(guid)
@@ -397,13 +397,21 @@ L.OPTION_KEYS = { "share", "help", "autoInvite", "autoAccept" }
 -- realms by default, and by "/hop on".
 L.RECOMMENDED = { share = true, help = true, autoInvite = true, autoAccept = true }
 
--- What one outdoor zone says about the realm: "pvp", "pve" or nil (no clue).
--- GetZonePVPInfo() returns "contested" only on PvP realms; on PvE realms a
--- contested zone returns nil. friendly/hostile/sanctuary say nothing.
+-- What one outdoor zone says about the realm: "pvp" or nil (no clue).
+-- GetZonePVPInfo() returns "contested" only on PvP realms. A missing PvP
+-- type proves nothing: WoW: Forever's PvP realm reports none either (0.3.0
+-- and older took it for PvE and turned everything on there).
 function L.ZoneRealmEvidence(pvpType, inInstance)
   if inInstance then return nil end
   if pvpType == "contested" then return "pvp" end
-  if pvpType == nil or pvpType == "" then return "pve" end
+  return nil
+end
+
+-- Realms whose name says the ruleset, like "ClassicBetaPvP" on WoW: Forever.
+function L.RealmNameHint(realm)
+  realm = (realm or ""):lower()
+  if realm:find("pvp", 1, true) then return "pvp" end
+  if realm:find("pve", 1, true) then return "pve" end
   return nil
 end
 

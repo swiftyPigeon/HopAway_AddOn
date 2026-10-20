@@ -93,14 +93,9 @@ ns.On("ZONE_CHANGED_NEW_AREA", UpdateMap)
 ns.On("PLAYER_TARGET_CHANGED", function() Observe("target") end)
 ns.On("UPDATE_MOUSEOVER_UNIT", function() Observe("mouseover") end)
 ns.On("NAME_PLATE_UNIT_ADDED", Observe)
-
--- The combat log catches exactly the players fighting around us, i.e. the
--- competition. Only GUIDs are read, so this stays cheap in a busy zone.
-ns.On("COMBAT_LOG_EVENT_UNFILTERED", function()
-  local _, _, _, src, _, _, _, dst = CombatLogGetCurrentEventInfo()
-  NotePlayer(src)
-  NotePlayer(dst)
-end)
+-- No combat log: this client forbids addons from registering
+-- COMBAT_LOG_EVENT_UNFILTERED (it pops up a "blocked" warning), so players
+-- are only counted from nameplates, target and mouseover.
 
 function Layers.SeenCount()
   return math.min(L.SeenCount(seenPlayers, GetTime()), L.MAX_SEEN)

@@ -90,6 +90,13 @@ ns.On("CHAT_MSG_ADDON", function(prefix, text, chatType, sender)
   if fn then fn(msg, sender) end
 end)
 
+-- The game blocked one of our calls: say which, so it can be fixed.
+local function ReportBlocked(addon, fn)
+  if addon == ADDON then ns.Print("|cffff6060the game blocked|r %s()", tostring(fn)) end
+end
+ns.On("ADDON_ACTION_FORBIDDEN", ReportBlocked)
+ns.On("ADDON_ACTION_BLOCKED", ReportBlocked)
+
 function ns.ChannelId()
   local id = GetChannelName(ns.CHANNEL)
   if id and id > 0 then return id end

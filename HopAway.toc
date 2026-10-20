@@ -2,7 +2,7 @@
 ## Title: HopAway
 ## Notes: Ask other HopAway users for an invite to move to another layer of your zone.
 ## Author: SwiftyPigeon512
-## Version: 0.3.0
+## Version: 0.3.1
 ## X-License: MIT
 ## X-Website: https://github.com/swiftyPigeon/HopAway_AddOn
 ## SavedVariables: HopAwayDB
