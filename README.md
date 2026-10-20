@@ -25,13 +25,22 @@ out of date after a patch, update that number. To get the current one in game:
   to another layer, and dragging moves it around the minimap edge. The tooltip shows your status.
 - `/hop away`: ask for an invite to another known layer in your zone.
 - `/hop cancel`: stop the current hop.
-- `/hop status`: your zone and layer, known layers with HopAway user/helper counts, realm type, hop state.
+- `/hop status`: your zone and layer, known layers with HopAway user/helper counts and crowd samples, realm type, hop state.
 - `/hop on|off`: turn every setting on or off.
 - `/hop share|help|autoinvite|autoaccept on|off`: single settings (also in the window).
 - `/hop show`: toggle the window. `/hop minimap`: toggle the minimap button.
 
 In the window, click a layer to hop to that one. Your own layer is green.
-Layers with no helpers are grey and can't be clicked. The **All off** radio
+Layers with no helpers are grey and can't be clicked. Each layer shows
+**~N seen**: how many players HopAway users there noticed nearby in the last
+5 min (a sample, not a headcount), and **left N min ago** if you hopped away
+from it recently.
+
+When no other layer has a helper, the window lists up to 4 online friends and
+guildmates in your zone. Click one to open a whisper asking for an invite and
+press Enter to send it. The game shows their zone but not their layer, so it's
+roughly a coin flip whether they're on another one. If their invite moves you,
+HopAway leaves the group as usual; if not, it asks whether to leave. The **All off** radio
 button turns every setting off; tick the boxes below it to turn single parts
 back on.
 
@@ -63,7 +72,8 @@ Anything you change yourself is kept and never overridden.
 
 HopAway users share through a chat channel (`HopAwayNet`) that anyone can
 join. When *Share my layer* is on, anyone on that channel can see your
-character name, zone and layer. On a PvP realm, enemy players could use this
+character name, zone and layer, and how many players you've noticed nearby
+(a number only, no names). On a PvP realm, enemy players could use this
 to find you, which is why HopAway starts off there. With sharing off, your
 zone and layer aren't sent, but your name still shows in the channel's
 member list.
@@ -73,25 +83,35 @@ member list.
 1. HopAway reads your layer from the `zoneUID` in NPC GUIDs (target, mouseover,
    nameplates). A new value only counts after two different NPCs show it and the
    old one has been gone for a few seconds.
-2. Users who share their layer announce it on a hidden chat channel (`HopAwayNet`) using addon messages.
-3. When you hop, HopAway picks another known layer with helpers and asks there.
-   It favours layers with fewer known HopAway users (a hint that fewer
-   players are there too), with some randomness so askers don't all pick the
-   same layer. Layers with more helpers get a small bonus (at most +50%), so
-   askers spread out without being sent to busier layers. Helpers
+2. It also counts the distinct players it notices on your layer in the last 5 min
+   (combat log, nameplates, target, mouseover): the crowd sample.
+3. Users who share their layer announce it, with their crowd sample, on a hidden
+   chat channel (`HopAwayNet`) using addon messages.
+4. When you hop, HopAway picks another known layer with helpers and asks there.
+   It favours layers where HopAway users see fewer players (the median of their
+   samples). If a layer has no sample yet, it compares HopAway user counts
+   instead. There's some randomness so askers don't all pick the same layer.
+   Layers with more helpers get a small bonus (at most +50%), so askers spread
+   out without being sent to busier layers. A layer you hopped away from in the
+   last 45 min counts a quarter, so you don't land back on it. Helpers
    reply with a chance scaled so that about 6 of them answer. You ask one of them
    (up to 3 in a row) to invite you.
-4. Accept the helper's invite within 20 s (instant with auto-accept), or HopAway
+5. Accept the helper's invite within 20 s (instant with auto-accept), or HopAway
    declines it and asks the next helper. When you join their group, the game moves you to their layer. HopAway sees the new
    `zoneUID` and leaves the group. If nothing changes within 20 s, it asks you whether to leave.
-5. After a failed ask, you wait 20 s, then 60 s, then 180 s before asking again.
+6. After a failed ask, you wait 20 s, then 60 s, then 180 s before asking again.
 
 ## Limits (please read)
 
 - **Needs other HopAway users.** Someone on another layer of the same zone must
   have *Layer help* on. With no users there, there's nobody to ask.
-- **It can't see real crowd sizes.** The counts only include HopAway users. Nobody
-  can count all players on a layer, so any other layer is a guess (usually a good one).
+- **It can't see real crowd sizes.** User and helper counts only include HopAway
+  users. The crowd sample only covers players near HopAway users on that layer.
+  Nobody can count all players on a layer, so any pick is still a guess (usually
+  a good one).
+- **0.3.0 doesn't talk to older versions.** The announce format changed, so 0.1.x
+  and 0.2.x users won't see 0.3.0 users and the other way round. Later versions
+  can add fields without this break.
 - **The game's layer cooldown.** If you changed layer recently, joining a group may
   not move you for a few minutes. HopAway will then ask whether to leave the group.
 - **Your layer must be known.** Look at a couple of NPCs first. Hopping is blocked in
@@ -102,7 +122,7 @@ member list.
 
 ## Tests
 
-The pure logic (GUID parsing, layer detection, message format, picks, throttles)
+The pure logic (GUID parsing, layer detection, message format, crowd sample, picks, throttles, contacts)
 is in `Logic.lua` and runs without the game:
 
 ```

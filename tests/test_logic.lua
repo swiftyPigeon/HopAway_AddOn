@@ -71,10 +71,10 @@ test("Detector doesn't flip back to stale readings", function()
 end)
 
 test("Encode/Decode round trip", function()
-  local text = L.Encode("A", { map = 1429, uid = "1234", help = true })
-  eq(text, "A:1:1429:1234:1")
+  local text = L.Encode("A", { map = 1429, uid = "1234", help = true, seen = 17 })
+  eq(text, "A:2:1429:1234:1:17")
   local msg = L.Decode(text)
-  eq(msg.kind, "A"); eq(msg.map, 1429); eq(msg.uid, "1234"); eq(msg.help, true)
+  eq(msg.kind, "A"); eq(msg.map, 1429); eq(msg.uid, "1234"); eq(msg.help, true); eq(msg.seen, 17)
 
   msg = L.Decode(L.Encode("O", { nonce = "ab12cd", inGroup = false, recent = 3 }))
   eq(msg.nonce, "ab12cd"); eq(msg.inGroup, false); eq(msg.recent, 3)
@@ -88,14 +88,18 @@ test("Encode rejects bad fields", function()
 end)
 
 test("Decode rejects bad messages", function()
-  eq(L.Decode("A:2:1429:1234:1"), nil, "version")
-  eq(L.Decode("A:1:1429:1234"), nil, "too few fields")
-  eq(L.Decode("A:1:1429:1234:1:extra"), nil, "too many fields")
-  eq(L.Decode("A:1:abc:1234:1"), nil, "not a number")
-  eq(L.Decode("A:1:1429:1234:yes"), nil, "not a boolean")
+  eq(L.Decode("A:1:1429:1234:1"), nil, "0.1/0.2 version")
+  eq(L.Decode("A:2:1429:1234:1"), nil, "too few fields")
+  eq(L.Decode("A:2:abc:1234:1:5"), nil, "not a number")
+  eq(L.Decode("A:2:1429:1234:yes:5"), nil, "not a boolean")
   eq(L.Decode("X:1"), nil, "unknown kind")
   eq(L.Decode(""), nil); eq(L.Decode(nil), nil)
   eq(L.Decode(string.rep("a", 300)), nil)
+end)
+
+test("Decode ignores extra fields from later versions", function()
+  local msg = L.Decode("A:2:1429:1234:0:5:future:stuff")
+  eq(msg.seen, 5); eq(msg.help, false)
 end)
 
 test("Nonce is 6 alphanumerics", function()
@@ -159,6 +163,86 @@ test("LayerWeight: small, capped helper bonus; crowd size wins", function()
   eq(L.LayerWeight({ users = 2, helpers = 9 }), 0.375, "capped at +50%")
   assert(L.LayerWeight({ users = 2, helpers = 1 }) > L.LayerWeight({ users = 3, helpers = 3 }),
     "quieter layer beats a busier one full of helpers")
+end)
+
+test("Median", function()
+  eq(L.Median({}), nil); eq(L.Median({ 7 }), 7)
+  eq(L.Median({ 30, 2, 10 }), 10); eq(L.Median({ 1, 4, 10, 2 }), 3)
+end)
+
+test("LayersInMap: crowd is the median of samples, nil without any", function()
+  local peers = {}
+  L.UpdatePeer(peers, "A", 10, "100", true, 0, 4)
+  L.UpdatePeer(peers, "B", 10, "100", true, 0, 40)
+  L.UpdatePeer(peers, "C", 10, "200", true, 0)
+  local layers = L.LayersInMap(peers, 10, 1, 500, { uid = "100", seen = 10 })
+  eq(layers[1].crowd, 10); eq(layers[2].crowd, nil)
+end)
+
+test("LayerWeight with crowd samples and the left-layer penalty", function()
+  local quiet = L.LayerWeight({ crowd = 5, helpers = 1 }, true)
+  local busy = L.LayerWeight({ crowd = 20, helpers = 1 }, true)
+  assert(math.abs(quiet / busy - 125 / 1000 ^ 0.5) < 1e-9, "(25/10)^1.5")
+  assert(L.LayerWeight({ crowd = 10, helpers = 1 }, true) >
+    L.LayerWeight({ crowd = 20, helpers = 9 }, true), "fewer seen beats more helpers")
+  eq(L.LayerWeight({ users = 2, helpers = 1, leftAgo = 60 }), 0.0625, "left: a quarter")
+end)
+
+test("PickLayer uses crowd only when every candidate has a sample", function()
+  -- With samples: 300 (crowd 0) beats 200 (crowd 50) by far.
+  local layers = {
+    { uid = "100", users = 9, helpers = 1, crowd = 99, mine = true },
+    { uid = "200", users = 1, helpers = 1, crowd = 50 },
+    { uid = "300", users = 4, helpers = 1, crowd = 0 },
+  }
+  eq(L.PickLayer(layers, "100", function() return 0.5 end), "300")
+  -- One candidate without a sample: fall back to user counts, 200 wins.
+  layers[3].crowd = nil
+  eq(L.PickLayer(layers, "100", function() return 0.5 end), "200")
+end)
+
+test("PickLayer avoids a layer we just left", function()
+  local layers = {
+    { uid = "200", users = 1, helpers = 1, leftAgo = 120 },
+    { uid = "300", users = 1, helpers = 1 },
+  }
+  local counts = { ["200"] = 0, ["300"] = 0 }
+  for _ = 1, 2000 do
+    local uid = L.PickLayer(layers, "100", math.random)
+    counts[uid] = counts[uid] + 1
+  end
+  assert(counts["300"] > counts["200"] * 2.5 and counts["200"] > 0, "about 4:1")
+end)
+
+test("Seen counter: distinct players in the window", function()
+  local s = L.NewSeen(300)
+  L.SeenAdd(s, "Player-1-A", 0); L.SeenAdd(s, "Player-1-A", 10); L.SeenAdd(s, "Player-1-B", 100)
+  eq(L.SeenCount(s, 200), 2)
+  eq(L.SeenCount(s, 350), 1, "A last seen at 10")
+  L.SeenReset(s); eq(L.SeenCount(s, 350), 0)
+  eq(L.IsPlayerGUID("Player-4395-0ABCDEF"), true)
+  eq(L.IsPlayerGUID("Creature-0-1-2-3-4-5"), false); eq(L.IsPlayerGUID(nil), false)
+end)
+
+test("CrowdChanged: at least 5 and 50%", function()
+  eq(L.CrowdChanged(nil, 50), false)
+  eq(L.CrowdChanged(4, 8), false); eq(L.CrowdChanged(4, 9), true)
+  eq(L.CrowdChanged(40, 59), false); eq(L.CrowdChanged(40, 60), true); eq(L.CrowdChanged(40, 20), true)
+end)
+
+test("ZoneContacts: online, same zone, no dupes, skips, max", function()
+  local list = {
+    { name = "Me-R", zone = "Elwynn Forest", online = true, kind = "friend" },
+    { name = "Ann-R", zone = "Elwynn Forest", online = true, kind = "friend" },
+    { name = "Ann-R", zone = "Elwynn Forest", online = true, kind = "guild" },
+    { name = "Bob-R", zone = "Westfall", online = true, kind = "guild" },
+    { name = "Cat-R", zone = "Elwynn Forest", online = false, kind = "guild" },
+    { name = "Dan-R", zone = "Elwynn Forest", online = true, kind = "guild" },
+    { name = "Eve-R", zone = "Elwynn Forest", online = true, kind = "guild" },
+    { name = "Fay-R", zone = "Elwynn Forest", online = true, kind = "guild" },
+  }
+  local out = L.ZoneContacts(list, "Elwynn Forest", "Me-R", { ["Dan-R"] = true }, 2)
+  eq(#out, 2); eq(out[1].name, "Ann-R"); eq(out[1].kind, "friend"); eq(out[2].name, "Eve-R")
 end)
 
 test("ZoneRealmEvidence", function()

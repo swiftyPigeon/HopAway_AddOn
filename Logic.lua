@@ -82,14 +82,17 @@ end
 ---------------------------------------------------------------------------
 -- Messages: "<kind>:<version>:<fields...>" (":" because "|" is WoW's chat
 -- escape character). Field types: n = number, d = digit string,
--- b = boolean (1/0), s = short alphanumeric word.
+-- b = boolean (1/0), s = short alphanumeric word. Readers ignore extra
+-- fields at the end, so a later version can add fields without bumping
+-- VERSION (0.3.0 bumped it to 2 for the crowd sample in A).
 ---------------------------------------------------------------------------
 
-L.VERSION = "1"
+L.VERSION = "2"
 L.SEP = ":"
+L.MAX_SEEN = 999
 
 L.SPEC = {
-  A = { { "map", "n" }, { "uid", "d" }, { "help", "b" } },         -- announce my layer
+  A = { { "map", "n" }, { "uid", "d" }, { "help", "b" }, { "seen", "n" } }, -- announce my layer
   Q = { { "map", "n" }, { "uid", "d" }, { "nonce", "s" } },        -- ask for an invite
   O = { { "nonce", "s" }, { "inGroup", "b" }, { "recent", "n" } }, -- helper offer
   R = { { "nonce", "s" } },                                        -- please invite me
@@ -150,7 +153,7 @@ function L.Decode(text)
   end
   local kind, version = parts[1], parts[2]
   local spec = L.SPEC[kind]
-  if not spec or version ~= L.VERSION or #parts ~= #spec + 2 then return nil end
+  if not spec or version ~= L.VERSION or #parts < #spec + 2 then return nil end
   local msg = { kind = kind }
   for i, f in ipairs(spec) do
     local v = DecodeField(f[2], parts[i + 2])
@@ -188,8 +191,9 @@ end
 -- Peers and layers
 ---------------------------------------------------------------------------
 
-function L.UpdatePeer(peers, name, map, uid, help, now)
-  peers[name] = { map = map, uid = uid, help = help and true or false, t = now }
+-- `seen` is the peer's crowd sample: players they noticed on their layer.
+function L.UpdatePeer(peers, name, map, uid, help, now, seen)
+  peers[name] = { map = map, uid = uid, help = help and true or false, t = now, seen = seen }
 end
 
 function L.ExpirePeers(peers, now, maxAge)
@@ -198,14 +202,28 @@ function L.ExpirePeers(peers, now, maxAge)
   end
 end
 
--- Layers known in one zone, sorted by zoneUID. `me` = { uid, help } adds
--- the player. Each entry: { uid, users, helpers, mine, newest }.
+-- Middle value (rounded down), or nil for an empty list.
+function L.Median(values)
+  if #values == 0 then return nil end
+  local s = {}
+  for i, v in ipairs(values) do s[i] = v end
+  table.sort(s)
+  local mid = math.floor(#s / 2)
+  if #s % 2 == 1 then return s[mid + 1] end
+  return math.floor((s[mid] + s[mid + 1]) / 2)
+end
+
+-- Layers known in one zone, sorted by zoneUID. `me` = { uid, help, seen }
+-- adds the player. Each entry: { uid, users, helpers, mine, newest, crowd }.
+-- crowd is the median of the users' crowd samples (users near each other
+-- see the same players, so adding them up would count people twice), or
+-- nil when nobody on the layer sent one.
 function L.LayersInMap(peers, mapID, now, maxAge, me)
   local byUid, list = {}, {}
-  local function add(uid, help, isMe, t)
+  local function add(uid, help, isMe, t, seen)
     local layer = byUid[uid]
     if not layer then
-      layer = { uid = uid, users = 0, helpers = 0, mine = false, newest = 0 }
+      layer = { uid = uid, users = 0, helpers = 0, mine = false, newest = 0, samples = {} }
       byUid[uid] = layer
       list[#list + 1] = layer
     end
@@ -213,11 +231,15 @@ function L.LayersInMap(peers, mapID, now, maxAge, me)
     if help then layer.helpers = layer.helpers + 1 end
     if isMe then layer.mine = true end
     if t > layer.newest then layer.newest = t end
+    if seen then table.insert(layer.samples, seen) end
   end
   for _, p in pairs(peers) do
-    if p.map == mapID and now - p.t <= maxAge then add(p.uid, p.help, false, p.t) end
+    if p.map == mapID and now - p.t <= maxAge then add(p.uid, p.help, false, p.t, p.seen) end
   end
-  if me and me.uid then add(me.uid, me.help, true, now) end
+  if me and me.uid then add(me.uid, me.help, true, now, me.seen) end
+  for _, layer in ipairs(list) do
+    layer.crowd, layer.samples = L.Median(layer.samples), nil
+  end
   table.sort(list, function(a, b)
     local x, y = tonumber(a.uid), tonumber(b.uid)
     if x and y and x ~= y then return x < y end
@@ -244,29 +266,102 @@ function L.WeightedPick(items, weight, rng)
   return last -- float rounding
 end
 
--- How likely we are to pick a layer. The goal is less competition for mobs:
--- a layer with fewer known HopAway users is likely to have fewer players
--- too, so the base weight is 1/users² (1 user vs 2 = 4:1). Only a hint: we
--- can't see how many real players are on any layer. Extra helpers add a
--- small bonus (+25% each, at most +50%) so askers spread over layers that
--- can take them, but crowd size stays what matters: a layer needs no more
--- than ~20% fewer users to beat one with the full bonus.
+-- How likely we are to pick a layer. The goal is less competition for mobs.
+--   useCrowd: weigh by the crowd sample (players HopAway users noticed):
+--     1/(crowd+5)^1.5, softer than below because one user's sample is noisy
+--     (5 vs 20 seen = 4:1, 10 vs 20 = 2.2:1).
+--   otherwise: weigh by known HopAway users, 1/users² (1 vs 2 = 4:1), a
+--     hint that fewer players are there too.
+-- Extra helpers add a small bonus (+25% each, at most +50%) so askers spread
+-- over layers that can take them, but crowd size stays what matters. A
+-- layer we hopped away from recently (leftAgo set) counts a quarter, so we
+-- don't land back on it unless it's the only choice.
 L.HELPER_BONUS, L.MAX_HELPER_BONUS = 0.25, 1.5
-function L.LayerWeight(l)
+L.CROWD_SMOOTH, L.CROWD_POWER = 5, 1.5
+L.LEFT_PENALTY = 0.25
+function L.LayerWeight(l, useCrowd)
   if (l.helpers or 0) <= 0 then return 0 end
-  local users = math.max(l.users or 1, 1)
   local bonus = math.min(1 + L.HELPER_BONUS * (l.helpers - 1), L.MAX_HELPER_BONUS)
-  return bonus / (users * users)
+  local crowd
+  if useCrowd then
+    crowd = (l.crowd + L.CROWD_SMOOTH) ^ L.CROWD_POWER
+  else
+    local users = math.max(l.users or 1, 1)
+    crowd = users * users
+  end
+  local w = bonus / crowd
+  if l.leftAgo then w = w * L.LEFT_PENALTY end
+  return w
 end
 
--- Pick another layer that has at least one helper. It stays random so
--- askers don't all pile onto the same quiet layer.
+-- Pick another layer that has at least one helper. Crowd samples are used
+-- only when every candidate has one, so all layers are weighed the same
+-- way. It stays random so askers don't all pile onto the same quiet layer.
 function L.PickLayer(layers, myUid, rng)
+  local useCrowd = true
+  for _, l in ipairs(layers) do
+    if l.uid ~= myUid and (l.helpers or 0) > 0 and not l.crowd then useCrowd = false end
+  end
   local layer = L.WeightedPick(layers, function(l)
     if l.uid == myUid then return 0 end
-    return L.LayerWeight(l)
+    return L.LayerWeight(l, useCrowd)
   end, rng)
   return layer and layer.uid
+end
+
+---------------------------------------------------------------------------
+-- Crowd sample: distinct players noticed on our layer in the last few
+-- minutes (combat log, nameplates, target, mouseover).
+---------------------------------------------------------------------------
+
+function L.IsPlayerGUID(guid)
+  return type(guid) == "string" and guid:sub(1, 7) == "Player-"
+end
+
+function L.NewSeen(window)
+  return { window = window, t = {} }
+end
+
+function L.SeenAdd(s, key, now)
+  s.t[key] = now
+end
+
+function L.SeenReset(s)
+  s.t = {}
+end
+
+function L.SeenCount(s, now)
+  local n = 0
+  for k, t in pairs(s.t) do
+    if now - t > s.window then s.t[k] = nil else n = n + 1 end
+  end
+  return n
+end
+
+-- Is the change from the last sent sample big enough to announce?
+function L.CrowdChanged(old, new)
+  if not old then return false end
+  return math.abs(new - old) >= math.max(5, old * 0.5)
+end
+
+---------------------------------------------------------------------------
+-- Fallback contacts: friends and guildmates in our zone we could ask for
+-- an invite by hand. The game tells us their zone, not their layer.
+---------------------------------------------------------------------------
+
+-- list: { { name, zone, online, kind } } with full names. Skips me,
+-- duplicates (a friend who's also in the guild) and names in `skip`.
+function L.ZoneContacts(list, zone, me, skip, max)
+  local out, seen = {}, {}
+  for _, c in ipairs(list) do
+    if #out >= max then break end
+    local name = c.name
+    if c.online and name and c.zone == zone and name ~= me and not seen[name] and not skip[name] then
+      seen[name] = true
+      out[#out + 1] = { name = name, kind = c.kind }
+    end
+  end
+  return out
 end
 
 -- Chance that one helper answers an ask, aiming for ~target offers in total.

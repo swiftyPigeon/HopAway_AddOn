@@ -9,14 +9,20 @@ local ANNOUNCE_EVERY = 600 -- re-announce every 10 min...
 local ANNOUNCE_JITTER = 120 -- ...plus up to 2 min, so users drift apart
 local ANNOUNCE_GAP = 30    -- never announce more often than this
 local SETTLE_MIN, SETTLE_MAX = 5, 15 -- wait this long after a change before announcing
+local CROWD_GAP = 120      -- a big swing in the crowd sample re-announces at most this often
 local PEER_MAX_AGE = 1500  -- forget a peer after ~2 announce periods
 local JOIN_DELAY = 8       -- let General/Trade take their channel numbers first
+local SEEN_WINDOW = 300    -- crowd sample: players noticed in the last 5 min
+local LEFT_TIME = 2700     -- remember layers we hopped away from for 45 min
 
 local detector = L.NewDetector({ need = 2, quiet = 3, window = 60 })
 local peers = {}
 local mapID, mapName
 local dirty, sendAt = false, 0
-local lastSent, lastAnnounce, nextPeriodic = nil, -math.huge, math.huge
+local lastSent, lastSeenSent, lastAnnounce, nextPeriodic = nil, nil, -math.huge, math.huge
+local seenPlayers = L.NewSeen(SEEN_WINDOW)
+local left = {} -- [mapID] = { [uid] = time we hopped away from it }, this session only
+local myGUID
 
 -- Something we announce changed. Wait a random few seconds first: users who
 -- change at the same moment don't all send at once, and a quick flip-flop
@@ -49,6 +55,9 @@ function Layers.GetMapName() return mapName end
 function Layers.GetLayer() return mapID and detector.current end
 
 local function LayerChanged(new, old)
+  -- Players seen before belong to the old layer. (On the first reading in
+  -- a zone, old is nil and what we saw is this layer's.)
+  if old then L.SeenReset(seenPlayers) end
   MarkDirty()
   ns.Hop.OnLayerChanged(new, old)
   ns.UI.Refresh()
@@ -59,12 +68,20 @@ local function UpdateMap()
   if id ~= mapID then
     mapID, mapName = id, name
     detector:Reset()
+    L.SeenReset(seenPlayers)
     ns.UI.Refresh()
   end
 end
 
+local function NotePlayer(guid)
+  if mapID and guid ~= myGUID and L.IsPlayerGUID(guid) then
+    L.SeenAdd(seenPlayers, guid, GetTime())
+  end
+end
+
 local function Observe(unit)
-  if not mapID or not UnitExists(unit) or UnitIsPlayer(unit) then return end
+  if not mapID or not UnitExists(unit) then return end
+  if UnitIsPlayer(unit) then return NotePlayer(UnitGUID(unit)) end
   local uid, npc = L.ParseGUID(UnitGUID(unit))
   if not uid then return end
   local new, old = detector:Observe(uid, npc, GetTime())
@@ -76,6 +93,25 @@ ns.On("ZONE_CHANGED_NEW_AREA", UpdateMap)
 ns.On("PLAYER_TARGET_CHANGED", function() Observe("target") end)
 ns.On("UPDATE_MOUSEOVER_UNIT", function() Observe("mouseover") end)
 ns.On("NAME_PLATE_UNIT_ADDED", Observe)
+
+-- The combat log catches exactly the players fighting around us, i.e. the
+-- competition. Only GUIDs are read, so this stays cheap in a busy zone.
+ns.On("COMBAT_LOG_EVENT_UNFILTERED", function()
+  local _, _, _, src, _, _, _, dst = CombatLogGetCurrentEventInfo()
+  NotePlayer(src)
+  NotePlayer(dst)
+end)
+
+function Layers.SeenCount()
+  return math.min(L.SeenCount(seenPlayers, GetTime()), L.MAX_SEEN)
+end
+
+-- A hop moved us away from `uid`: pick it less for a while.
+function Layers.MarkLeft(uid)
+  if not mapID or not uid then return end
+  left[mapID] = left[mapID] or {}
+  left[mapID][uid] = GetTime()
+end
 
 ---------------------------------------------------------------------------
 -- Hidden channel
@@ -132,29 +168,49 @@ local function MaybeAnnounce(now)
   if not ns.db.share then return end
   local uid = Layers.GetLayer()
   if not uid or not ns.ChannelId() then return end
+  local seen = Layers.SeenCount()
   local periodic = now >= nextPeriodic
-  if not periodic and (not dirty or now < sendAt) then return end
+  -- A big swing in the crowd sample is worth an update, but not often.
+  local crowdMoved = L.CrowdChanged(lastSeenSent, seen) and now - lastAnnounce >= CROWD_GAP
+  if not periodic and not crowdMoved and (not dirty or now < sendAt) then return end
   if now - lastAnnounce < ANNOUNCE_GAP then return end
   dirty = false
   local help = Layers.Helping()
   local state = mapID .. ":" .. uid .. ":" .. (help and 1 or 0)
-  if state == lastSent and not periodic then return end -- changed back while settling
-  ns.Send("A", { map = mapID, uid = uid, help = help }, "CHANNEL", nil, "announce")
-  lastSent, lastAnnounce = state, now
+  if state == lastSent and not periodic and not crowdMoved then return end -- changed back while settling
+  ns.Send("A", { map = mapID, uid = uid, help = help, seen = seen }, "CHANNEL", nil, "announce")
+  lastSent, lastSeenSent, lastAnnounce = state, seen, now
   nextPeriodic = now + ANNOUNCE_EVERY + math.random(0, ANNOUNCE_JITTER)
 end
 
 ns.OnMessage("A", function(msg, sender)
-  L.UpdatePeer(peers, sender, msg.map, msg.uid, msg.help, GetTime())
+  L.UpdatePeer(peers, sender, msg.map, msg.uid, msg.help, GetTime(), msg.seen)
   if msg.map == mapID then ns.UI.Refresh() end
 end)
 
--- Known layers in my zone (HopAway users only), including me.
+-- Known layers in my zone (HopAway users only), including me. Layers we
+-- hopped away from recently get leftAgo (seconds).
 function Layers.KnownLayers()
   if not mapID then return {} end
+  local now = GetTime()
   local uid = Layers.GetLayer()
-  local me = uid and { uid = uid, help = ns.db.share and Layers.Helping() }
-  return L.LayersInMap(peers, mapID, GetTime(), PEER_MAX_AGE, me)
+  local me = uid and { uid = uid, help = ns.db.share and Layers.Helping(), seen = Layers.SeenCount() }
+  local list = L.LayersInMap(peers, mapID, now, PEER_MAX_AGE, me)
+  local leftHere = left[mapID]
+  for _, layer in ipairs(list) do
+    local t = leftHere and leftHere[layer.uid]
+    if t and now - t < LEFT_TIME then layer.leftAgo = now - t end
+  end
+  return list
+end
+
+-- HopAway users announced on my layer: no point asking them by hand.
+function Layers.PeersOnMyLayer()
+  local out, uid = {}, Layers.GetLayer()
+  for name, p in pairs(peers) do
+    if p.map == mapID and p.uid == uid then out[name] = true end
+  end
+  return out
 end
 
 function Layers.HelpersOn(uid)
@@ -165,6 +221,7 @@ function Layers.HelpersOn(uid)
 end
 
 function Layers.Init()
+  myGUID = UnitGUID("player")
   ns.After(JOIN_DELAY, JoinChannel)
   ns.Every(1, function()
     local now = GetTime()

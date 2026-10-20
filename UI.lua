@@ -4,12 +4,13 @@ local UI = {}
 ns.UI = UI
 
 local MAX_ROWS = 8
+local CONTACT_ROWS = 4 -- matches CONTACTS_MAX in Hop.lua
 local ROW_H = 18
 local TOP_H = 52     -- title + zone line
 local BOTTOM_H = 208 -- note, hop button, status, "All off", checkboxes
-local WIDTH = 260
+local WIDTH = 320
 
-local frame, rows, checks, allOff, minimapButton
+local frame, rows, contactRows, checks, allOff, minimapButton
 
 ---------------------------------------------------------------------------
 -- Popups
@@ -57,14 +58,16 @@ local function Render()
     mine and ("#" .. mine) or "unknown"))
 
   local n = math.min(#layers, MAX_ROWS)
+  local hasTarget = false
   for i, row in ipairs(rows) do
     local layer = layers[i]
     if i <= n then
       row.uid = layer.uid
       row.clickable = not layer.mine and layer.helpers > 0
-      local text = ("#%s   %d user(s), %d helper(s)"):format(layer.uid, layer.users, layer.helpers)
+      hasTarget = hasTarget or row.clickable
+      local text = ns.Hop.LayerText(layer)
       if layer.mine then
-        text = "|cff60ff60" .. text .. "  (you)|r"
+        text = "|cff60ff60" .. text .. "|r"
       elseif layer.helpers == 0 then
         text = "|cff808080" .. text .. "|r"
       end
@@ -75,7 +78,30 @@ local function Render()
     end
   end
   frame.empty:SetShown(n == 0)
-  frame:SetHeight(TOP_H + math.max(n, 1) * ROW_H + BOTTOM_H)
+
+  -- No helper to ask: offer friends and guildmates in this zone instead.
+  local y = TOP_H + math.max(n, 1) * ROW_H + 4
+  local contacts = (ns.Hop.IsIdle() and mine and not hasTarget) and ns.Hop.Contacts() or nil
+  frame.contactLabel:SetShown(contacts ~= nil)
+  if contacts then
+    frame.contactLabel:SetPoint("TOPLEFT", 14, -y)
+    frame.contactLabel:SetText(#contacts > 0 and "No helper known. Ask someone in this zone:" or
+      "No helper known, and no friends or guildmates online in this zone.")
+    y = y + ROW_H
+  end
+  for i, row in ipairs(contactRows) do
+    local c = contacts and contacts[i]
+    if c then
+      row.name = c.name
+      row:SetPoint("TOPLEFT", 12, -y)
+      row.text:SetText(("%s |cff808080(%s)|r  - ask for an invite"):format(Ambiguate(c.name, "short"), c.kind))
+      row:Show()
+      y = y + ROW_H
+    else
+      row:Hide()
+    end
+  end
+  frame:SetHeight(y + BOTTOM_H)
 
   frame.hopButton:SetText(ns.Hop.IsIdle() and "Hop to another layer" or "Cancel hop")
   frame.status:SetText("Hop: " .. ns.Hop.Describe())
@@ -137,13 +163,29 @@ local function CreateWindow()
     rows[i] = row
   end
 
+  frame.contactLabel = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+  frame.contactLabel:SetWidth(WIDTH - 28)
+  frame.contactLabel:SetJustifyH("LEFT")
+
+  contactRows = {}
+  for i = 1, CONTACT_ROWS do
+    local row = CreateFrame("Button", nil, frame)
+    row:SetSize(WIDTH - 24, ROW_H)
+    row:SetHighlightTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight", "ADD")
+    row.text = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    row.text:SetPoint("LEFT", 4, 0)
+    row:SetScript("OnClick", function(self) ns.Safe(ns.Hop.AskContact, self.name) end)
+    row:Hide()
+    contactRows[i] = row
+  end
+
   -- Bottom part, anchored to the frame's bottom edge.
   local note = frame:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
   note:SetPoint("BOTTOMLEFT", 14, 174)
   note:SetWidth(WIDTH - 28)
   note:SetJustifyH("LEFT")
-  note:SetText("Counts are HopAway users only, not real crowd sizes. Hop picks a layer " ..
-    "with fewer known users, or click one with helpers. Any choice is a guess.")
+  note:SetText("Users/helpers are HopAway users. \"Seen\" = players they noticed nearby, " ..
+    "a sample, not a headcount. Hop picks a quieter layer, or click one with helpers.")
 
   frame.hopButton = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
   frame.hopButton:SetSize(200, 22)

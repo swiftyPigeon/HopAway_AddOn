@@ -13,13 +13,18 @@ local MAX_HELPERS = 3      -- helpers to try per ask
 local OFFER_TARGET = 6     -- offers we'd like per ask
 local OFFER_TTL = 60       -- a helper's offer is valid this long
 local RECENT_WINDOW = 600  -- "recent invites" window for helpers
+local CONTACT_TIMEOUT = 120 -- wait this long for a friend's or guildmate's invite
+local CONTACTS_MAX = 4     -- friends/guildmates listed as a fallback
+local CONTACT_TEXT = "Could you invite me to your group for a moment? " ..
+  "I'm hopping layers with HopAway and will leave right away."
 
 ---------------------------------------------------------------------------
 -- Asker state machine. Each state change bumps `gen`, so timers started in
 -- an earlier state do nothing.
 ---------------------------------------------------------------------------
 
--- states: idle, collecting, requesting, grouped
+-- states: idle, collecting, requesting, grouped. hop.contact is set while
+-- we wait for a friend or guildmate we whispered (no ask/offer round).
 local hop = { state = "idle", gen = 0, failures = 0, nextAllowed = 0 }
 
 local function SetState(state)
@@ -44,7 +49,7 @@ end
 
 local function Reset()
   hop.nonce, hop.offers, hop.tried, hop.helper, hop.target, hop.origin = nil, nil, nil, nil, nil, nil
-  hop.invited = nil
+  hop.invited, hop.contact = nil, nil
   SetState("idle")
 end
 
@@ -67,7 +72,7 @@ local function Fail(reason)
 end
 
 -- Why we can't hop right now, or nil.
-local function Blocker()
+local function Blocker(needChannel)
   if IsInInstance() then return "You can't hop inside an instance." end
   if InCombatLockdown() or UnitAffectingCombat("player") then return "You can't hop in combat." end
   if IsInGroup() then return "You're already in a group. Leave it first." end
@@ -75,7 +80,7 @@ local function Blocker()
   if not ns.Layers.GetLayer() then
     return "Your layer isn't known yet. Target or mouse over a couple of NPCs."
   end
-  if not ns.Layers.ChannelReady() then
+  if needChannel and not ns.Layers.ChannelReady() then
     return "Not connected to the HopAway channel yet. Try again in a few seconds."
   end
 end
@@ -90,7 +95,7 @@ function Hop.Away(targetUid)
     ns.Print("Nobody invited you last time. You can ask again in %d s.", math.ceil(wait))
     return
   end
-  local why = Blocker()
+  local why = Blocker(true)
   if why then ns.Print(why); return end
 
   local mine = ns.Layers.GetLayer()
@@ -102,7 +107,8 @@ function Hop.Away(targetUid)
   targetUid = targetUid or L.PickLayer(ns.Layers.KnownLayers(), mine, math.random)
   if not targetUid then
     ns.Print("No other layer with a helper is known in this zone. HopAway only knows " ..
-      "about other HopAway users who turned on layer help.")
+      "about other HopAway users who turned on layer help. You can ask a friend or " ..
+      "guildmate in this zone from the window (/hop show).")
     return
   end
 
@@ -111,8 +117,8 @@ function Hop.Away(targetUid)
   hop.offers, hop.tried = {}, {}
   SetState("collecting")
   ns.Send("Q", { map = ns.Layers.GetMap(), uid = targetUid, nonce = hop.nonce }, "CHANNEL")
-  ns.Print("Asking for an invite to layer #%s. HopAway favours layers with fewer known " ..
-    "HopAway users, but it can't see how crowded layers really are.", targetUid)
+  ns.Print("Asking for an invite to layer #%s. HopAway favours layers where its users see " ..
+    "fewer players, but that's a sample, not a headcount.", targetUid)
   Later(COLLECT_TIME, Hop.NextHelper)
 end
 
@@ -136,6 +142,64 @@ function Hop.NextHelper()
     ns.Print("%s didn't invite you.", Short(offer.name))
     Hop.NextHelper()
   end)
+end
+
+-- Fallback: ask a friend or guildmate in this zone by whisper. The game
+-- only sends chat on a key press, so we open the whisper and the player
+-- presses Enter. Their invite then runs the normal flow (auto-accept only
+-- from them, leave after the layer change, or ask if nothing changes
+-- because they were on our layer after all).
+function Hop.AskContact(name)
+  if hop.state ~= "idle" then
+    ns.Print("Already hopping. Type /hop cancel to stop.")
+    return
+  end
+  local why = Blocker(false)
+  if why then ns.Print(why); return end
+  hop.origin, hop.helper, hop.contact = ns.Layers.GetLayer(), name, true
+  SetState("requesting")
+  ChatFrame_OpenChat("/w " .. Ambiguate(name, "none") .. " " .. CONTACT_TEXT)
+  ns.Print("Press Enter to whisper %s. If they're on another layer, joining their group " ..
+    "moves you, and HopAway then leaves it.", Short(name))
+  Later(CONTACT_TIMEOUT, function()
+    ns.Print("No invite from %s.", Short(name))
+    DeclinePending()
+    Reset()
+  end)
+end
+
+-- Online friends and guildmates in this zone, skipping HopAway users known
+-- to be on our layer. Cached for a few seconds: the window refreshes often.
+local contacts, contactsAt, rosterAsked = {}, -math.huge, -math.huge
+
+function Hop.Contacts()
+  local now = GetTime()
+  if now - contactsAt < 5 then return contacts end
+  contactsAt = now
+  local zone = ns.Layers.GetMapName()
+  if not zone then contacts = {}; return contacts end
+  local list = {}
+  if C_FriendList and C_FriendList.GetNumFriends then
+    for i = 1, C_FriendList.GetNumFriends() do
+      local f = C_FriendList.GetFriendInfoByIndex(i)
+      if f then
+        list[#list + 1] = { name = L.FullName(f.name, ns.realm), zone = f.area, online = f.connected, kind = "friend" }
+      end
+    end
+  end
+  if IsInGuild() then
+    if now - rosterAsked > 30 then -- ask the server for fresh zones now and then
+      rosterAsked = now
+      local ask = (C_GuildInfo and C_GuildInfo.GuildRoster) or GuildRoster
+      if ask then ask() end
+    end
+    for i = 1, GetNumGuildMembers() do
+      local name, _, _, _, _, gzone, _, _, online = GetGuildRosterInfo(i)
+      list[#list + 1] = { name = L.FullName(name, ns.realm), zone = gzone, online = online, kind = "guild" }
+    end
+  end
+  contacts = L.ZoneContacts(list, zone, ns.me, ns.Layers.PeersOnMyLayer(), CONTACTS_MAX)
+  return contacts
 end
 
 function Hop.Cancel()
@@ -207,6 +271,7 @@ function Hop.OnLayerChanged(new, old)
   if hop.state ~= "grouped" or new == hop.origin then return end
   StaticPopup_Hide("HOPAWAY_LEAVE")
   ns.Print("Layer changed: #%s -> #%s. Leaving the group.", tostring(old or hop.origin), new)
+  ns.Layers.MarkLeft(hop.origin)
   hop.failures, hop.nextAllowed = 0, 0
   Reset() -- first, so the roster update doesn't report an early leave
   LeaveGroup()
@@ -352,6 +417,19 @@ end
 
 local function OnOff(v) return v and "on" or "off" end
 
+-- One layer as text, shared by /hop status and the window.
+function Hop.LayerText(l)
+  local text = ("#%s  %d user%s, %d helper%s"):format(
+    l.uid, l.users, l.users == 1 and "" or "s", l.helpers, l.helpers == 1 and "" or "s")
+  if l.crowd then text = text .. (", ~%d seen"):format(l.crowd) end
+  if l.mine then
+    text = text .. "  (you)"
+  elseif l.leftAgo then
+    text = text .. ("  left %d min ago"):format(math.max(1, math.floor(l.leftAgo / 60)))
+  end
+  return text
+end
+
 function Hop.StatusLines()
   local lines = {}
   local mine = ns.Layers.GetLayer()
@@ -363,10 +441,10 @@ function Hop.StatusLines()
     lines[#lines + 1] = "No HopAway users known in this zone."
   end
   for _, l in ipairs(layers) do
-    lines[#lines + 1] = ("  #%s: %d user(s), %d helper(s)%s"):format(
-      l.uid, l.users, l.helpers, l.mine and " (you)" or "")
+    lines[#lines + 1] = "  " .. Hop.LayerText(l)
   end
-  lines[#lines + 1] = "Counts include HopAway users only, not real player numbers."
+  lines[#lines + 1] = "Users/helpers are HopAway users only. \"Seen\" is how many players " ..
+    "HopAway users noticed nearby: a sample, not a headcount."
   lines[#lines + 1] = "Hop: " .. Hop.Describe()
   local realm = ns.Setup.RealmType()
   lines[#lines + 1] = "Realm: " .. (realm == "pvp" and "PvP" or realm == "pve" and "PvE" or
