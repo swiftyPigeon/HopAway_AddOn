@@ -244,16 +244,27 @@ function L.WeightedPick(items, weight, rng)
   return last -- float rounding
 end
 
--- Pick another layer that has at least one helper, aiming for a less
--- populated one: a layer with fewer known HopAway users is likely to have
--- fewer players too, so the weight is 1/users² (1 user vs 2 = 4:1). Only a
--- hint: we can't see how many real players are on any layer. It stays
--- random so askers don't all pile onto the same quiet layer.
+-- How likely we are to pick a layer. The goal is less competition for mobs:
+-- a layer with fewer known HopAway users is likely to have fewer players
+-- too, so the base weight is 1/users² (1 user vs 2 = 4:1). Only a hint: we
+-- can't see how many real players are on any layer. Extra helpers add a
+-- small bonus (+25% each, at most +50%) so askers spread over layers that
+-- can take them, but crowd size stays what matters: a layer needs no more
+-- than ~20% fewer users to beat one with the full bonus.
+L.HELPER_BONUS, L.MAX_HELPER_BONUS = 0.25, 1.5
+function L.LayerWeight(l)
+  if (l.helpers or 0) <= 0 then return 0 end
+  local users = math.max(l.users or 1, 1)
+  local bonus = math.min(1 + L.HELPER_BONUS * (l.helpers - 1), L.MAX_HELPER_BONUS)
+  return bonus / (users * users)
+end
+
+-- Pick another layer that has at least one helper. It stays random so
+-- askers don't all pile onto the same quiet layer.
 function L.PickLayer(layers, myUid, rng)
   local layer = L.WeightedPick(layers, function(l)
-    if l.uid == myUid or l.helpers <= 0 then return 0 end
-    local users = math.max(l.users or 1, 1)
-    return 1 / (users * users)
+    if l.uid == myUid then return 0 end
+    return L.LayerWeight(l)
   end, rng)
   return layer and layer.uid
 end
@@ -265,7 +276,8 @@ function L.ReplyChance(helpers, target)
 end
 
 -- Offers: { name, inGroup, recent }. Favour helpers not in a group and with
--- fewer recent invites; skip names in `tried`.
+-- fewer recent invites; skip names in `tried`. (Grouped helpers are ones
+-- leading a HopAway-only party; 0.1.0 helpers offer from any small party.)
 function L.PickOffer(offers, tried, rng)
   return L.WeightedPick(offers, function(o)
     if tried[o.name] then return 0 end

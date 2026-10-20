@@ -54,9 +54,9 @@ Anything you change yourself is kept and never overridden.
 
 | Setting | What it does |
 |---|---|
-| Share my layer | Announces your zone + layer to other HopAway users (on change and every ~10 min). |
-| Layer help | Answers players who ask to join your layer. Turning it on also turns on sharing, because helpers have to be announced to be found. |
-| Auto-invite askers | When someone you offered to help asks, invite them without a popup. Otherwise you get an Accept/Decline popup (20 s). |
+| Share my layer | Announces your zone + layer to other HopAway users: 5–15 s after a change (at most once every 30 s) and every 10–12 min. |
+| Layer help | Answers players who ask to join your layer. Turning it on also turns on sharing, because helpers have to be announced to be found. You keep helping while you lead a party made only of HopAway guests (each joined less than 1 min ago), so several askers can share it. In any other group or raid you're announced as not helping and asks are ignored, so nobody gets added to a group players made; it resumes when you're solo. |
+| Auto-invite askers | When someone you offered to help asks, invite them without a popup, even while you're in combat. Otherwise you get an Accept/Decline popup (20 s), and asks that come in while you're fighting are skipped. |
 | Auto-accept my helper's invite | Accepts the invite only when it comes from the exact helper you asked. Invites from anyone else are never auto-accepted. |
 
 ## Privacy
@@ -77,10 +77,12 @@ member list.
 3. When you hop, HopAway picks another known layer with helpers and asks there.
    It favours layers with fewer known HopAway users (a hint that fewer
    players are there too), with some randomness so askers don't all pick the
-   same layer. Helpers
+   same layer. Layers with more helpers get a small bonus (at most +50%), so
+   askers spread out without being sent to busier layers. Helpers
    reply with a chance scaled so that about 6 of them answer. You ask one of them
    (up to 3 in a row) to invite you.
-4. When you join their group, the game moves you to their layer. HopAway sees the new
+4. Accept the helper's invite within 20 s (instant with auto-accept), or HopAway
+   declines it and asks the next helper. When you join their group, the game moves you to their layer. HopAway sees the new
    `zoneUID` and leaves the group. If nothing changes within 20 s, it asks you whether to leave.
 5. After a failed ask, you wait 20 s, then 60 s, then 180 s before asking again.
 

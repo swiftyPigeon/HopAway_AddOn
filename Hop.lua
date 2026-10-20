@@ -7,7 +7,7 @@ ns.Hop = Hop
 
 local COLLECT_TIME = 3     -- seconds to collect offers after an ask
 local REQUEST_TIMEOUT = 25 -- wait for a helper to react (their popup lasts 20 s)
-local INVITE_GRACE = 40    -- helper says "invite sent": wait for the group join
+local INVITE_GRACE = 20    -- helper says "invite sent": accept within this, or we decline it
 local MOVE_TIMEOUT = 20    -- in the group but no layer change seen: ask the player
 local MAX_HELPERS = 3      -- helpers to try per ask
 local OFFER_TARGET = 6     -- offers we'd like per ask
@@ -44,7 +44,18 @@ end
 
 local function Reset()
   hop.nonce, hop.offers, hop.tried, hop.helper, hop.target, hop.origin = nil, nil, nil, nil, nil, nil
+  hop.invited = nil
   SetState("idle")
+end
+
+-- Turn down our helper's invite if it's still open, so it can't be accepted
+-- late and the next helper's invite isn't blocked by it.
+local function DeclinePending()
+  if hop.invited and not IsInGroup() then
+    DeclineGroup()
+    StaticPopup_Hide("PARTY_INVITE")
+  end
+  hop.invited = nil
 end
 
 local function Fail(reason)
@@ -108,6 +119,7 @@ end
 -- Ask the next helper (random, favouring helpers not in a group and with
 -- fewer recent invites) or give up after MAX_HELPERS.
 function Hop.NextHelper()
+  DeclinePending()
   local tried = 0
   for _ in pairs(hop.tried) do tried = tried + 1 end
   if tried >= MAX_HELPERS then return Fail("None of the helpers invited you.") end
@@ -129,6 +141,7 @@ end
 function Hop.Cancel()
   if hop.state == "idle" then ns.Print("No hop in progress."); return end
   StaticPopup_Hide("HOPAWAY_LEAVE")
+  DeclinePending()
   Reset()
   ns.Print("Hop cancelled.")
 end
@@ -153,7 +166,7 @@ ns.OnMessage("I", function(msg, sender)
   ns.Print("%s is inviting you.", Short(sender))
   SetState("requesting") -- restart the timeout with more time to click the invite
   Later(INVITE_GRACE, function()
-    ns.Print("The invite from %s wasn't accepted.", Short(sender))
+    ns.Print("The invite from %s wasn't accepted within %d s.", Short(sender), INVITE_GRACE)
     Hop.NextHelper()
   end)
 end)
@@ -166,12 +179,14 @@ ns.On("PARTY_INVITE_REQUEST", function(name)
     ns.Print("This invite is from %s, not from your HopAway helper %s.", name, Short(hop.helper))
     return
   end
+  hop.invited = true
   if ns.db.autoAccept then
     AcceptGroup()
     StaticPopup_Hide("PARTY_INVITE")
     ns.Print("Accepted the invite from your helper %s.", Short(hop.helper))
   else
-    ns.Print("This invite is from %s, your HopAway helper. Accept it to change layer.", Short(hop.helper))
+    ns.Print("This invite is from %s, your HopAway helper. Accept it within %d s to change layer.",
+      Short(hop.helper), INVITE_GRACE)
   end
 end)
 
@@ -225,19 +240,50 @@ local function RecentInvites(now)
   return #invites
 end
 
+-- Players we invited, by short name -> { invited = t, joined = t }. They
+-- count as HopAway guests for GUEST_TIME after joining; one who stays longer
+-- is a real groupmate. An invite nobody accepted is forgotten after INVITE_TIME.
+local GUEST_TIME = 60
+local INVITE_TIME = 30 -- the guest declines after 20 s, plus some slack
+local guests = {}
+
+-- True when we lead a party whose other members are all recent HopAway
+-- guests, so more askers can join it. A group players made, a raid, or a
+-- name we can't match all count as a real group: no guests land there.
+function Hop.HopAwayGroup()
+  if not IsInGroup() or IsInRaid() or not UnitIsGroupLeader("player") then return false end
+  local n = GetNumGroupMembers()
+  if n >= 5 then return false end
+  local now = GetTime()
+  for i = 1, n - 1 do
+    local g = guests[UnitName("party" .. i) or ""]
+    if not g or (not g.joined and now - g.invited > INVITE_TIME) then return false end
+    g.joined = g.joined or now -- Layers calls this every second, close enough
+    if now - g.joined > GUEST_TIME then return false end
+  end
+  return true
+end
+
 local function CanHelp()
   if not (ns.db.help and ns.db.share) then return false end
-  if IsInInstance() or InCombatLockdown() then return false end
+  if IsInInstance() then return false end
+  -- In a crowded zone helpers are fighting most of the time. With
+  -- auto-invite the invite needs no click, so combat doesn't stop it.
+  if not ns.db.autoInvite and (InCombatLockdown() or UnitAffectingCombat("player")) then return false end
   if hop.state ~= "idle" then return false end
-  if IsInRaid() then return false end
-  if IsInGroup() and (not UnitIsGroupLeader("player") or GetNumGroupMembers() >= 5) then return false end
+  if IsInGroup() and not Hop.HopAwayGroup() then return false end
   return true
 end
 
 local function Invite(name, nonce)
   local invite = (C_PartyInfo and C_PartyInfo.InviteUnit) or InviteUnit
   invite(Ambiguate(name, "none"))
-  table.insert(invites, GetTime())
+  local now = GetTime()
+  for k, g in pairs(guests) do
+    if now - (g.joined or g.invited) > (g.joined and GUEST_TIME or INVITE_TIME) then guests[k] = nil end
+  end
+  guests[Short(name)] = { invited = now }
+  table.insert(invites, now)
   ns.Send("I", { nonce = nonce }, "WHISPER", name)
   ns.Print("Invited %s to your layer. They'll leave the group once they've moved.", Short(name))
 end

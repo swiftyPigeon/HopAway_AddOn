@@ -137,7 +137,7 @@ end)
 
 test("PickLayer favours layers with fewer known users", function()
   local layers = {
-    { uid = "100", users = 4, helpers = 3 }, -- weight 1/16
+    { uid = "100", users = 4, helpers = 3 }, -- weight 1.5/16
     { uid = "200", users = 1, helpers = 1 }, -- weight 1
     { uid = "300", users = 9, helpers = 9 }, -- mine
   }
@@ -150,6 +150,15 @@ test("PickLayer favours layers with fewer known users", function()
   eq(counts["300"], nil, "never my layer")
   assert(counts["200"] > counts["100"] * 8, "weights")
   assert((counts["100"] or 0) > 0, "busier layers still possible")
+end)
+
+test("LayerWeight: small, capped helper bonus; crowd size wins", function()
+  eq(L.LayerWeight({ users = 2, helpers = 0 }), 0)
+  eq(L.LayerWeight({ users = 2, helpers = 1 }), 0.25)
+  eq(L.LayerWeight({ users = 2, helpers = 2 }), 0.3125)
+  eq(L.LayerWeight({ users = 2, helpers = 9 }), 0.375, "capped at +50%")
+  assert(L.LayerWeight({ users = 2, helpers = 1 }) > L.LayerWeight({ users = 3, helpers = 3 }),
+    "quieter layer beats a busier one full of helpers")
 end)
 
 test("ZoneRealmEvidence", function()

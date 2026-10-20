@@ -5,15 +5,25 @@ local L = ns.Logic
 local Layers = {}
 ns.Layers = Layers
 
-local ANNOUNCE_EVERY = 600 -- re-announce every 10 min (plus up to 60 s jitter)
-local ANNOUNCE_GAP = 15    -- never announce more often than this
-local PEER_MAX_AGE = 1500  -- forget a peer after ~2.5 announce periods
+local ANNOUNCE_EVERY = 600 -- re-announce every 10 min...
+local ANNOUNCE_JITTER = 120 -- ...plus up to 2 min, so users drift apart
+local ANNOUNCE_GAP = 30    -- never announce more often than this
+local SETTLE_MIN, SETTLE_MAX = 5, 15 -- wait this long after a change before announcing
+local PEER_MAX_AGE = 1500  -- forget a peer after ~2 announce periods
 local JOIN_DELAY = 8       -- let General/Trade take their channel numbers first
 
 local detector = L.NewDetector({ need = 2, quiet = 3, window = 60 })
 local peers = {}
 local mapID, mapName
-local dirty, lastAnnounce, nextPeriodic = false, -math.huge, 0
+local dirty, sendAt = false, 0
+local lastSent, lastAnnounce, nextPeriodic = nil, -math.huge, math.huge
+
+-- Something we announce changed. Wait a random few seconds first: users who
+-- change at the same moment don't all send at once, and a quick flip-flop
+-- (a helper's guest joining and leaving) is never sent at all.
+local function MarkDirty()
+  if not dirty then dirty, sendAt = true, GetTime() + math.random(SETTLE_MIN, SETTLE_MAX) end
+end
 
 ---------------------------------------------------------------------------
 -- Zone and layer
@@ -39,7 +49,7 @@ function Layers.GetMapName() return mapName end
 function Layers.GetLayer() return mapID and detector.current end
 
 local function LayerChanged(new, old)
-  dirty = true
+  MarkDirty()
   ns.Hop.OnLayerChanged(new, old)
   ns.UI.Refresh()
 end
@@ -97,19 +107,41 @@ end)
 -- Announcements
 ---------------------------------------------------------------------------
 
-function Layers.RequestAnnounce()
-  dirty = true
+Layers.RequestAnnounce = MarkDirty
+
+-- Helpers in a group players made don't take guests (see CanHelp in
+-- Hop.lua), so they announce themselves as not helping until they're solo
+-- or back in a HopAway-only group.
+function Layers.Helping()
+  return ns.db.help and (not IsInGroup() or ns.Hop.HopAwayGroup())
 end
+
+-- Re-announce when that flips: on roster changes, and from the 1 s tick
+-- because a guest who stays turns into a real groupmate without an event.
+local wasHelping
+local function CheckHelping()
+  local helping = Layers.Helping()
+  if helping == wasHelping then return end
+  wasHelping = helping
+  MarkDirty()
+  ns.UI.Refresh()
+end
+ns.On("GROUP_ROSTER_UPDATE", CheckHelping)
 
 local function MaybeAnnounce(now)
   if not ns.db.share then return end
   local uid = Layers.GetLayer()
   if not uid or not ns.ChannelId() then return end
-  if now >= nextPeriodic then dirty = true end
-  if not dirty or now - lastAnnounce < ANNOUNCE_GAP then return end
-  ns.Send("A", { map = mapID, uid = uid, help = ns.db.help }, "CHANNEL", nil, "announce")
-  dirty, lastAnnounce = false, now
-  nextPeriodic = now + ANNOUNCE_EVERY + math.random(0, 60)
+  local periodic = now >= nextPeriodic
+  if not periodic and (not dirty or now < sendAt) then return end
+  if now - lastAnnounce < ANNOUNCE_GAP then return end
+  dirty = false
+  local help = Layers.Helping()
+  local state = mapID .. ":" .. uid .. ":" .. (help and 1 or 0)
+  if state == lastSent and not periodic then return end -- changed back while settling
+  ns.Send("A", { map = mapID, uid = uid, help = help }, "CHANNEL", nil, "announce")
+  lastSent, lastAnnounce = state, now
+  nextPeriodic = now + ANNOUNCE_EVERY + math.random(0, ANNOUNCE_JITTER)
 end
 
 ns.OnMessage("A", function(msg, sender)
@@ -121,7 +153,7 @@ end)
 function Layers.KnownLayers()
   if not mapID then return {} end
   local uid = Layers.GetLayer()
-  local me = uid and { uid = uid, help = ns.db.share and ns.db.help }
+  local me = uid and { uid = uid, help = ns.db.share and Layers.Helping() }
   return L.LayersInMap(peers, mapID, GetTime(), PEER_MAX_AGE, me)
 end
 
@@ -139,6 +171,7 @@ function Layers.Init()
     UpdateMap()
     local new, old = detector:Evaluate(now)
     if new then LayerChanged(new, old) end
+    CheckHelping()
     MaybeAnnounce(now)
   end)
   ns.Every(60, function()
