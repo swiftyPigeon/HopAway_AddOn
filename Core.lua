@@ -12,6 +12,8 @@ ns.CHANNEL = "HopAwayNet" -- hidden custom channel for announces and asks
 --   welcomed: the "HopAway is on" welcome was printed
 local ACCOUNT_DEFAULTS = {
   minimap = { angle = 250, hide = false },
+  debug = false,   -- /hop debug: record events into debugLog
+  debugLog = {},
   realms = {}, -- [realm] = "pvp" | "pve", learned from zone PvP info
 }
 
@@ -30,6 +32,7 @@ end
 function ns.Print(msg, ...)
   if select("#", ...) > 0 then msg = msg:format(...) end
   DEFAULT_CHAT_FRAME:AddMessage("|cff66ccffHopAway|r: " .. msg)
+  if ns.Log then ns.Log("%s", msg) end
 end
 
 ---------------------------------------------------------------------------
@@ -63,7 +66,8 @@ local eventHandlers, msgHandlers = {}, {}
 function ns.On(event, fn)
   if not eventHandlers[event] then
     eventHandlers[event] = {}
-    eventFrame:RegisterEvent(event)
+    -- pcall: an event this client doesn't know must not stop the file loading.
+    pcall(eventFrame.RegisterEvent, eventFrame, event)
   end
   table.insert(eventHandlers[event], fn)
 end
@@ -188,6 +192,7 @@ local function Usage()
   ns.Print("  /hop on|off - turn everything on or off")
   ns.Print("  /hop share|help|autoinvite|autoaccept on|off")
   ns.Print("  /hop show - toggle the layer window;  /hop minimap - toggle the minimap button")
+  ns.Print("  /hop debug on|off|clear - record layer/group events;  /hop mark - add a numbered mark")
 end
 
 local function HandleSlash(input)
@@ -202,6 +207,10 @@ local function HandleSlash(input)
     ns.UI.Toggle()
   elseif cmd == "on" or cmd == "off" then
     ns.SetAll(cmd == "on")
+  elseif cmd == "debug" then
+    ns.Debug.Command(arg)
+  elseif cmd == "mark" then
+    ns.Debug.Mark()
   elseif cmd == "minimap" then
     ns.adb.minimap.hide = not ns.adb.minimap.hide
     ns.UI.UpdateMinimap()

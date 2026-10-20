@@ -272,10 +272,10 @@ local function CreateMinimapButton()
   bg:SetPoint("TOPLEFT", 7, -5)
 
   local icon = b:CreateTexture(nil, "ARTWORK")
-  icon:SetSize(17, 17)
-  icon:SetTexture("Interface\\Icons\\Spell_Arcane_Blink")
-  icon:SetTexCoord(0.05, 0.95, 0.05, 0.95)
-  icon:SetPoint("TOPLEFT", 7, -6)
+  -- The frog brings its own round dark background, so it fills the ring.
+  icon:SetSize(20, 20)
+  icon:SetTexture("Interface\\AddOns\\HopAway\\Media\\Icon")
+  icon:SetPoint("TOPLEFT", 7, -5)
 
   local border = b:CreateTexture(nil, "OVERLAY")
   border:SetSize(53, 53)

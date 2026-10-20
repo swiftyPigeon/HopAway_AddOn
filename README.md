@@ -29,6 +29,10 @@ out of date after a patch, update that number. To get the current one in game:
 - `/hop on|off`: turn every setting on or off.
 - `/hop share|help|autoinvite|autoaccept on|off`: single settings (also in the window).
 - `/hop show`: toggle the window. `/hop minimap`: toggle the minimap button.
+- `/hop debug on|off|clear`: record a timestamped log of layer, zone, group,
+  invite, popup and system-message events (`/hop debug` shows the last lines).
+  `/hop mark` adds a numbered snapshot. The log is kept in
+  `WTF/Account/<account>/SavedVariables/HopAway.lua` after a `/reload` or logout.
 
 In the window, click a layer to hop to that one. Your own layer is green.
 Layers with no helpers are grey and can't be clicked. Each layer shows

@@ -424,6 +424,21 @@ function L.StartSettings(realmType)
 end
 
 ---------------------------------------------------------------------------
+-- Debug log
+---------------------------------------------------------------------------
+
+-- Chat colour codes (|cAARRGGBB ... |r) removed, for a readable log.
+function L.StripColors(s)
+  return (tostring(s):gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", ""))
+end
+
+-- Append a line, dropping the oldest ones beyond `max`.
+function L.LogPush(log, line, max)
+  log[#log + 1] = line
+  while #log > max do table.remove(log, 1) end
+end
+
+---------------------------------------------------------------------------
 -- Throttles
 ---------------------------------------------------------------------------
 

@@ -292,6 +292,13 @@ test("PickOffer skips tried and favours ungrouped, less busy helpers", function(
   assert(counts.free > counts.grouped * 2 and counts.free > counts.busy * 2, "weights")
 end)
 
+test("Debug log helpers", function()
+  eq(L.StripColors("|cff66ccffHopAway|r: hi |cffff6060x|r"), "HopAway: hi x")
+  local log = {}
+  for i = 1, 5 do L.LogPush(log, "l" .. i, 3) end
+  eq(#log, 3); eq(log[1], "l3"); eq(log[3], "l5")
+end)
+
 test("Backoff steps", function()
   eq(L.Backoff(0), 0); eq(L.Backoff(1), 20); eq(L.Backoff(2), 60); eq(L.Backoff(3), 180); eq(L.Backoff(9), 180)
 end)

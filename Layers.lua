@@ -55,6 +55,7 @@ function Layers.GetMapName() return mapName end
 function Layers.GetLayer() return mapID and detector.current end
 
 local function LayerChanged(new, old)
+  ns.Log("layer: #%s -> #%s in %s", tostring(old), new, tostring(mapName))
   -- Players seen before belong to the old layer. (On the first reading in
   -- a zone, old is nil and what we saw is this layer's.)
   if old then L.SeenReset(seenPlayers) end
@@ -67,6 +68,7 @@ local function UpdateMap()
   local id, name = CurrentZoneMap()
   if id ~= mapID then
     mapID, mapName = id, name
+    ns.Log("zone: %s (map %s)", tostring(name), tostring(id))
     detector:Reset()
     L.SeenReset(seenPlayers)
     ns.UI.Refresh()
@@ -84,6 +86,9 @@ local function Observe(unit)
   if UnitIsPlayer(unit) then return NotePlayer(UnitGUID(unit)) end
   local uid, npc = L.ParseGUID(UnitGUID(unit))
   if not uid then return end
+  if uid ~= detector.current and not detector.seen[uid] then
+    ns.Log("NPC on #%s (layer was #%s): %s", uid, tostring(detector.current), tostring(UnitName(unit)))
+  end
   local new, old = detector:Observe(uid, npc, GetTime())
   if new then LayerChanged(new, old) end
 end

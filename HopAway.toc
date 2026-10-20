@@ -2,15 +2,16 @@
 ## Title: HopAway
 ## Notes: Ask other HopAway users for an invite to move to another layer of your zone.
 ## Author: SwiftyPigeon512
-## Version: 0.3.1
+## Version: 0.3.2
 ## X-License: MIT
 ## X-Website: https://github.com/swiftyPigeon/HopAway_AddOn
 ## SavedVariables: HopAwayDB
 ## SavedVariablesPerCharacter: HopAwayCharDB
-## IconTexture: Interface\Icons\Spell_Arcane_Blink
+## IconTexture: Interface\AddOns\HopAway\Media\Icon
 
 Logic.lua
 Core.lua
+Debug.lua
 Setup.lua
 Layers.lua
 Hop.lua

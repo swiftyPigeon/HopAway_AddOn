@@ -43,6 +43,7 @@ local function Short(name)
 end
 
 local function LeaveGroup()
+  ns.Log("leaving the group")
   local leave = (C_PartyInfo and C_PartyInfo.LeaveParty) or LeaveParty
   leave()
 end
@@ -57,6 +58,7 @@ end
 -- late and the next helper's invite isn't blocked by it.
 local function DeclinePending()
   if hop.invited and not IsInGroup() then
+    ns.Log("declining the open invite from %s", tostring(hop.helper))
     DeclineGroup()
     StaticPopup_Hide("PARTY_INVITE")
   end
